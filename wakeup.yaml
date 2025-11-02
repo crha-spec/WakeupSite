@@ -13,7 +13,7 @@ jobs:
       - name: 🎯 Render sitesini uyandır
         run: |
           echo "🚀 Site uyandırılıyor..."
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://newvideoplatformsmycall.onrender.com/")
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://buseferkusursuziste.onrender.com")
           TIME=$(date '+%Y-%m-%d %H:%M:%S')
           
           if [ "$STATUS" = "200" ]; then
