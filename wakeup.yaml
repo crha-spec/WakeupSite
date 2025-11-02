@@ -1,23 +1,23 @@
-
 name: 🚀 Site Uyandırıcı
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    # Her 25 dakikada bir çalışır
+    - cron: '*/25 * * * *'
   workflow_dispatch:
 
 jobs:
   wakeup:
     runs-on: ubuntu-latest
     steps:
-      - name: 🎯 Siteyi uyandır
+      - name: 🎯 Render sitesini uyandır
         run: |
           echo "🚀 Site uyandırılıyor..."
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://videoplatform-kaan.onrender.com")
           TIME=$(date '+%Y-%m-%d %H:%M:%S')
           
           if [ "$STATUS" = "200" ]; then
-            echo "✅ $TIME - Site uyandı!"
+            echo "✅ $TIME - Site aktif (Status: $STATUS)"
           else
-            echo "⚠️ $TIME - Site yanıt vermiyor"
+            echo "⚠️ $TIME - Site yanıt vermiyor (Status: $STATUS)"
           fi
