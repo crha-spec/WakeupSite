@@ -1,1 +1,23 @@
 
+name: 🚀 Site Uyandırıcı
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  wakeup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🎯 Siteyi uyandır
+        run: |
+          echo "🚀 Site uyandırılıyor..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://videoplatform-kaan.onrender.com")
+          TIME=$(date '+%Y-%m-%d %H:%M:%S')
+          
+          if [ "$STATUS" = "200" ]; then
+            echo "✅ $TIME - Site uyandı!"
+          else
+            echo "⚠️ $TIME - Site yanıt vermiyor"
+          fi
