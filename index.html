@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Network Analyzer Pro - Gerçek Zamanlı</title>
+    <title>Network Analyzer Pro - Cloud</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.js"></script>
     <style>
         body { 
@@ -30,7 +30,7 @@
             <div class="flex items-center justify-between">
                 <div>
                     <h1 class="text-3xl font-bold flex items-center gap-3">
-                        🌐 Network Analyzer Pro
+                        🌐 Network Analyzer Pro (Cloud)
                         <span id="status" class="text-sm px-3 py-1 bg-green-500 rounded-full flex items-center gap-2">
                             <span class="pulse-dot">●</span> Bağlı
                         </span>
@@ -48,19 +48,54 @@
             </div>
         </div>
 
+        <!-- Usage Instructions -->
+        <div class="bg-yellow-900 bg-opacity-30 border border-yellow-700 rounded-lg p-4 mb-6">
+            <h3 class="font-bold text-yellow-400 mb-2">📖 Nasıl Kullanılır?</h3>
+            <div class="text-sm text-yellow-100 space-y-2">
+                <p><strong>1.</strong> Aşağıdaki input'a analiz etmek istediğin URL'i yapıştır</p>
+                <p><strong>2.</strong> "Analyze" butonuna tıkla</p>
+                <p><strong>3.</strong> İsteğin detaylarını ve response'u gerçek zamanlı gör</p>
+            </div>
+        </div>
+
+        <!-- URL Input -->
+        <div class="bg-gray-800 rounded-lg p-4 mb-6 border border-gray-700">
+            <div class="flex gap-2">
+                <select id="method" class="bg-gray-900 border border-gray-700 rounded px-4 py-2">
+                    <option>GET</option>
+                    <option>POST</option>
+                    <option>PUT</option>
+                    <option>DELETE</option>
+                </select>
+                <input 
+                    type="text" 
+                    id="targetUrl" 
+                    placeholder="🌐 Analiz edilecek URL (örn: https://api.example.com/data)" 
+                    class="flex-1 bg-gray-900 border border-gray-700 rounded px-4 py-2 focus:outline-none focus:border-blue-500"
+                    value="https://jsonplaceholder.typicode.com/posts/1"
+                >
+                <button onclick="analyzeUrl()" class="px-6 py-2 bg-blue-500 hover:bg-blue-600 rounded-lg font-semibold transition">
+                    🔍 Analyze
+                </button>
+            </div>
+            <div id="loading" class="hidden mt-3 text-center text-yellow-400">
+                ⏳ İstek gönderiliyor...
+            </div>
+        </div>
+
         <!-- Stats -->
         <div class="grid grid-cols-5 gap-4 mb-6">
             <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
-                <div class="text-gray-400 text-sm">Toplam Paket</div>
+                <div class="text-gray-400 text-sm">Toplam İstek</div>
                 <div class="text-3xl font-bold text-blue-400" id="stat-total">0</div>
             </div>
             <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
-                <div class="text-gray-400 text-sm">HTTP</div>
-                <div class="text-3xl font-bold text-orange-400" id="stat-http">0</div>
+                <div class="text-gray-400 text-sm">Başarılı</div>
+                <div class="text-3xl font-bold text-green-400" id="stat-success">0</div>
             </div>
             <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
-                <div class="text-gray-400 text-sm">HTTPS</div>
-                <div class="text-3xl font-bold text-green-400" id="stat-https">0</div>
+                <div class="text-gray-400 text-sm">Hata</div>
+                <div class="text-3xl font-bold text-red-400" id="stat-error">0</div>
             </div>
             <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
                 <div class="text-gray-400 text-sm">Oyun Trafiği</div>
@@ -88,15 +123,17 @@
             <!-- Packet List -->
             <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
                 <div class="bg-gray-900 px-4 py-3 border-b border-gray-700">
-                    <h2 class="font-semibold">📦 Yakalanan Paketler (<span id="packet-count">0</span>)</h2>
+                    <h2 class="font-semibold">📦 Analiz Edilen İstekler (<span id="packet-count">0</span>)</h2>
                 </div>
-                <div id="packet-list" class="h-[600px] overflow-y-auto scroll-custom"></div>
+                <div id="packet-list" class="h-[600px] overflow-y-auto scroll-custom">
+                    <div class="text-center text-gray-500 mt-20">Henüz analiz yapılmadı</div>
+                </div>
             </div>
 
             <!-- Packet Details -->
             <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
                 <div class="bg-gray-900 px-4 py-3 border-b border-gray-700">
-                    <h2 class="font-semibold">📋 Paket Detayları</h2>
+                    <h2 class="font-semibold">📋 İstek Detayları</h2>
                 </div>
                 <div class="border-b border-gray-700 flex">
                     <button class="tab-btn px-4 py-2 text-sm font-medium" data-tab="overview">Overview</button>
@@ -106,7 +143,7 @@
                     <button class="tab-btn px-4 py-2 text-sm font-medium" data-tab="memory">Memory</button>
                 </div>
                 <div id="packet-details" class="h-[560px] overflow-y-auto scroll-custom p-4">
-                    <div class="text-center text-gray-500 mt-20">Bir paket seçin</div>
+                    <div class="text-center text-gray-500 mt-20">Bir istek seçin</div>
                 </div>
             </div>
         </div>
@@ -115,12 +152,14 @@
     <script>
         let packets = [];
         let selectedPacket = null;
-        let stats = { total: 0, http: 0, https: 0, game: 0, size: 0 };
+        let stats = { total: 0, success: 0, error: 0, game: 0, size: 0 };
         let ws = null;
 
         // WebSocket bağlantısı
         function connectWebSocket() {
-            ws = new WebSocket('ws://localhost:8081');
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}`;
+            ws = new WebSocket(wsUrl);
             
             ws.onopen = () => {
                 console.log('✅ WebSocket bağlandı');
@@ -145,32 +184,75 @@
             };
         }
 
+        // URL analiz et
+        async function analyzeUrl() {
+            const targetUrl = document.getElementById('targetUrl').value.trim();
+            const method = document.getElementById('method').value;
+            
+            if (!targetUrl) {
+                alert('Lütfen bir URL girin!');
+                return;
+            }
+
+            if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+                alert('URL http:// veya https:// ile başlamalı!');
+                return;
+            }
+
+            document.getElementById('loading').classList.remove('hidden');
+
+            try {
+                const response = await fetch(`/proxy/${targetUrl}`, {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                document.getElementById('loading').classList.add('hidden');
+
+                if (!response.ok) {
+                    alert(`Hata: ${response.status} ${response.statusText}`);
+                }
+            } catch (error) {
+                document.getElementById('loading').classList.add('hidden');
+                alert('İstek hatası: ' + error.message);
+            }
+        }
+
+        // Enter tuşu ile analiz
+        document.getElementById('targetUrl').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') analyzeUrl();
+        });
+
         // Paket ekle
         function addPacket(packet) {
             packets.unshift(packet);
             if (packets.length > 500) packets.pop();
             
-            // Stats güncelle
             stats.total++;
             stats.size += packet.size;
-            if (!packet.isSecure) stats.http++;
-            if (packet.isSecure) stats.https++;
+            if (packet.statusCode >= 200 && packet.statusCode < 400) stats.success++;
+            else stats.error++;
             if (packet.isGame) stats.game++;
             
             updateStats();
             renderPackets();
+            
+            // İlk paketi otomatik seç
+            if (packets.length === 1) {
+                selectPacket(packet);
+            }
         }
 
-        // Stats güncelle
         function updateStats() {
             document.getElementById('stat-total').textContent = stats.total;
-            document.getElementById('stat-http').textContent = stats.http;
-            document.getElementById('stat-https').textContent = stats.https;
+            document.getElementById('stat-success').textContent = stats.success;
+            document.getElementById('stat-error').textContent = stats.error;
             document.getElementById('stat-game').textContent = stats.game;
             document.getElementById('stat-size').textContent = formatBytes(stats.size);
         }
 
-        // Paketleri render et
         function renderPackets() {
             const filter = document.getElementById('filter').value.toLowerCase();
             const filtered = packets.filter(p => 
@@ -181,6 +263,11 @@
             );
             
             document.getElementById('packet-count').textContent = filtered.length;
+            
+            if (filtered.length === 0) {
+                document.getElementById('packet-list').innerHTML = '<div class="text-center text-gray-500 mt-20">Henüz analiz yapılmadı</div>';
+                return;
+            }
             
             const html = filtered.map(p => `
                 <div class="packet-item p-3 border-b border-gray-700 cursor-pointer transition" onclick='selectPacket(${JSON.stringify(p).replace(/'/g, "&#39;")})'>
@@ -204,13 +291,11 @@
             document.getElementById('packet-list').innerHTML = html;
         }
 
-        // Paket seç
         function selectPacket(packet) {
             selectedPacket = packet;
             showTab('overview');
         }
 
-        // Tab göster
         function showTab(tab) {
             if (!selectedPacket) return;
             
@@ -247,7 +332,21 @@
                     const reqHeaders = Object.entries(selectedPacket.requestHeaders || {}).map(([k, v]) => 
                         `<div class="border-b border-gray-700 pb-2"><div class="text-xs text-gray-500">${k}</div><div class="text-sm break-all">${v}</div></div>`
                     ).join('');
-                    content = `<div class="space-y-2"><h3 class="font-semibold text-yellow-400 mb-2">Request Headers</h3>${reqHeaders}</div>`;
+                    const resHeaders = Object.entries(selectedPacket.responseHeaders || {}).map(([k, v]) => 
+                        `<div class="border-b border-gray-700 pb-2"><div class="text-xs text-gray-500">${k}</div><div class="text-sm break-all">${v}</div></div>`
+                    ).join('');
+                    content = `
+                        <div class="space-y-4">
+                            <div>
+                                <h3 class="font-semibold text-yellow-400 mb-2">Request Headers</h3>
+                                <div class="space-y-2">${reqHeaders}</div>
+                            </div>
+                            <div>
+                                <h3 class="font-semibold text-green-400 mb-2">Response Headers</h3>
+                                <div class="space-y-2">${resHeaders}</div>
+                            </div>
+                        </div>
+                    `;
                     break;
                 case 'request':
                     content = `<pre class="bg-gray-900 p-3 rounded text-xs overflow-x-auto"><code class="text-green-400">${selectedPacket.requestBody || 'No request body'}</code></pre>`;
@@ -280,12 +379,10 @@
             document.getElementById('packet-details').innerHTML = content;
         }
 
-        // Tab butonları
         document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.addEventListener('click', () => showTab(btn.dataset.tab));
         });
 
-        // Helper functions
         function getMethodColor(method) {
             const colors = {
                 GET: 'bg-blue-100 text-blue-700',
@@ -311,13 +408,13 @@
         }
 
         function clearPackets() {
-            if (confirm('Tüm paketleri temizlemek istediğinize emin misiniz?')) {
+            if (confirm('Tüm istekleri temizlemek istediğinize emin misiniz?')) {
                 packets = [];
-                stats = { total: 0, http: 0, https: 0, game: 0, size: 0 };
+                stats = { total: 0, success: 0, error: 0, game: 0, size: 0 };
                 selectedPacket = null;
                 updateStats();
                 renderPackets();
-                document.getElementById('packet-details').innerHTML = '<div class="text-center text-gray-500 mt-20">Bir paket seçin</div>';
+                document.getElementById('packet-details').innerHTML = '<div class="text-center text-gray-500 mt-20">Bir istek seçin</div>';
             }
         }
 
@@ -335,7 +432,6 @@
             renderPackets();
         }
 
-        // Başlat
         connectWebSocket();
     </script>
 </body>
