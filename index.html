@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Analyzer Pro - Gerçek Zamanlı</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.js"></script>
+    <style>
+        body { 
+            background: #0a0e27; 
+            color: #e2e8f0;
+            font-family: 'Monaco', 'Courier New', monospace;
+        }
+        .packet-item:hover { background: #1e293b; }
+        .glow { box-shadow: 0 0 20px rgba(59, 130, 246, 0.5); }
+        .scroll-custom::-webkit-scrollbar { width: 8px; }
+        .scroll-custom::-webkit-scrollbar-track { background: #1e293b; }
+        .scroll-custom::-webkit-scrollbar-thumb { background: #3b82f6; border-radius: 4px; }
+        .pulse-dot { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body class="p-4">
+    <div class="max-w-7xl mx-auto">
+        <!-- Header -->
+        <div class="bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg p-6 mb-6 glow">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-3xl font-bold flex items-center gap-3">
+                        🌐 Network Analyzer Pro
+                        <span id="status" class="text-sm px-3 py-1 bg-green-500 rounded-full flex items-center gap-2">
+                            <span class="pulse-dot">●</span> Bağlı
+                        </span>
+                    </h1>
+                    <p class="text-blue-100 mt-2">Gerçek Zamanlı HTTP/HTTPS Trafik İzleme</p>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="clearPackets()" class="px-4 py-2 bg-red-500 hover:bg-red-600 rounded-lg font-semibold transition">
+                        🗑️ Temizle
+                    </button>
+                    <button onclick="exportPackets()" class="px-4 py-2 bg-green-500 hover:bg-green-600 rounded-lg font-semibold transition">
+                        💾 Export
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats -->
+        <div class="grid grid-cols-5 gap-4 mb-6">
+            <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                <div class="text-gray-400 text-sm">Toplam Paket</div>
+                <div class="text-3xl font-bold text-blue-400" id="stat-total">0</div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                <div class="text-gray-400 text-sm">HTTP</div>
+                <div class="text-3xl font-bold text-orange-400" id="stat-http">0</div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                <div class="text-gray-400 text-sm">HTTPS</div>
+                <div class="text-3xl font-bold text-green-400" id="stat-https">0</div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                <div class="text-gray-400 text-sm">Oyun Trafiği</div>
+                <div class="text-3xl font-bold text-purple-400" id="stat-game">0</div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                <div class="text-gray-400 text-sm">Toplam Boyut</div>
+                <div class="text-2xl font-bold text-cyan-400" id="stat-size">0 KB</div>
+            </div>
+        </div>
+
+        <!-- Filter -->
+        <div class="bg-gray-800 rounded-lg p-4 mb-4 border border-gray-700">
+            <input 
+                type="text" 
+                id="filter" 
+                placeholder="🔍 URL, method, status kodu ile filtrele..." 
+                class="w-full bg-gray-900 border border-gray-700 rounded px-4 py-2 focus:outline-none focus:border-blue-500"
+                oninput="filterPackets()"
+            >
+        </div>
+
+        <!-- Main Content -->
+        <div class="grid grid-cols-2 gap-4">
+            <!-- Packet List -->
+            <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+                <div class="bg-gray-900 px-4 py-3 border-b border-gray-700">
+                    <h2 class="font-semibold">📦 Yakalanan Paketler (<span id="packet-count">0</span>)</h2>
+                </div>
+                <div id="packet-list" class="h-[600px] overflow-y-auto scroll-custom"></div>
+            </div>
+
+            <!-- Packet Details -->
+            <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+                <div class="bg-gray-900 px-4 py-3 border-b border-gray-700">
+                    <h2 class="font-semibold">📋 Paket Detayları</h2>
+                </div>
+                <div class="border-b border-gray-700 flex">
+                    <button class="tab-btn px-4 py-2 text-sm font-medium" data-tab="overview">Overview</button>
+                    <button class="tab-btn px-4 py-2 text-sm font-medium" data-tab="headers">Headers</button>
+                    <button class="tab-btn px-4 py-2 text-sm font-medium" data-tab="request">Request</button>
+                    <button class="tab-btn px-4 py-2 text-sm font-medium" data-tab="response">Response</button>
+                    <button class="tab-btn px-4 py-2 text-sm font-medium" data-tab="memory">Memory</button>
+                </div>
+                <div id="packet-details" class="h-[560px] overflow-y-auto scroll-custom p-4">
+                    <div class="text-center text-gray-500 mt-20">Bir paket seçin</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let packets = [];
+        let selectedPacket = null;
+        let stats = { total: 0, http: 0, https: 0, game: 0, size: 0 };
+        let ws = null;
+
+        // WebSocket bağlantısı
+        function connectWebSocket() {
+            ws = new WebSocket('ws://localhost:8081');
+            
+            ws.onopen = () => {
+                console.log('✅ WebSocket bağlandı');
+                document.getElementById('status').innerHTML = '<span class="pulse-dot">●</span> Bağlı';
+                document.getElementById('status').className = 'text-sm px-3 py-1 bg-green-500 rounded-full flex items-center gap-2';
+            };
+            
+            ws.onmessage = (event) => {
+                const packet = JSON.parse(event.data);
+                addPacket(packet);
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+            
+            ws.onclose = () => {
+                console.log('❌ WebSocket bağlantısı kesildi');
+                document.getElementById('status').innerHTML = '● Bağlantı Kesildi';
+                document.getElementById('status').className = 'text-sm px-3 py-1 bg-red-500 rounded-full';
+                setTimeout(connectWebSocket, 3000);
+            };
+        }
+
+        // Paket ekle
+        function addPacket(packet) {
+            packets.unshift(packet);
+            if (packets.length > 500) packets.pop();
+            
+            // Stats güncelle
+            stats.total++;
+            stats.size += packet.size;
+            if (!packet.isSecure) stats.http++;
+            if (packet.isSecure) stats.https++;
+            if (packet.isGame) stats.game++;
+            
+            updateStats();
+            renderPackets();
+        }
+
+        // Stats güncelle
+        function updateStats() {
+            document.getElementById('stat-total').textContent = stats.total;
+            document.getElementById('stat-http').textContent = stats.http;
+            document.getElementById('stat-https').textContent = stats.https;
+            document.getElementById('stat-game').textContent = stats.game;
+            document.getElementById('stat-size').textContent = formatBytes(stats.size);
+        }
+
+        // Paketleri render et
+        function renderPackets() {
+            const filter = document.getElementById('filter').value.toLowerCase();
+            const filtered = packets.filter(p => 
+                !filter || 
+                p.url.toLowerCase().includes(filter) ||
+                p.method.toLowerCase().includes(filter) ||
+                p.statusCode.toString().includes(filter)
+            );
+            
+            document.getElementById('packet-count').textContent = filtered.length;
+            
+            const html = filtered.map(p => `
+                <div class="packet-item p-3 border-b border-gray-700 cursor-pointer transition" onclick='selectPacket(${JSON.stringify(p).replace(/'/g, "&#39;")})'>
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center gap-2">
+                            <span class="px-2 py-1 rounded text-xs font-semibold ${getMethodColor(p.method)}">${p.method}</span>
+                            ${p.isSecure ? '🔒' : '🔓'}
+                            ${p.isGame ? '<span class="px-2 py-1 bg-purple-500 rounded text-xs">GAME</span>' : ''}
+                        </div>
+                        <span class="font-semibold ${getStatusColor(p.statusCode)}">${p.statusCode}</span>
+                    </div>
+                    <div class="text-sm text-gray-300 mb-1 truncate">${p.fullUrl || p.url}</div>
+                    <div class="flex gap-4 text-xs text-gray-500">
+                        <span>${formatBytes(p.size)}</span>
+                        <span>${p.duration}ms</span>
+                        <span>${new Date(p.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                </div>
+            `).join('');
+            
+            document.getElementById('packet-list').innerHTML = html;
+        }
+
+        // Paket seç
+        function selectPacket(packet) {
+            selectedPacket = packet;
+            showTab('overview');
+        }
+
+        // Tab göster
+        function showTab(tab) {
+            if (!selectedPacket) return;
+            
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                if (btn.dataset.tab === tab) {
+                    btn.className = 'tab-btn px-4 py-2 text-sm font-medium bg-gray-700 text-blue-400 border-b-2 border-blue-400';
+                } else {
+                    btn.className = 'tab-btn px-4 py-2 text-sm font-medium text-gray-400';
+                }
+            });
+            
+            let content = '';
+            switch(tab) {
+                case 'overview':
+                    content = `
+                        <div class="space-y-3">
+                            <div>
+                                <div class="text-xs text-gray-500 mb-1">URL</div>
+                                <div class="text-sm text-blue-400 break-all">${selectedPacket.fullUrl || selectedPacket.url}</div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div><div class="text-xs text-gray-500">Method</div><div class="text-sm font-bold">${selectedPacket.method}</div></div>
+                                <div><div class="text-xs text-gray-500">Status</div><div class="text-sm font-bold ${getStatusColor(selectedPacket.statusCode)}">${selectedPacket.statusCode}</div></div>
+                                <div><div class="text-xs text-gray-500">Protocol</div><div class="text-sm">${selectedPacket.protocol}</div></div>
+                                <div><div class="text-xs text-gray-500">Size</div><div class="text-sm">${formatBytes(selectedPacket.size)}</div></div>
+                                <div><div class="text-xs text-gray-500">Duration</div><div class="text-sm">${selectedPacket.duration}ms</div></div>
+                                <div><div class="text-xs text-gray-500">Content-Type</div><div class="text-sm">${selectedPacket.contentType}</div></div>
+                            </div>
+                            <div><div class="text-xs text-gray-500">Timestamp</div><div class="text-sm">${new Date(selectedPacket.timestamp).toLocaleString()}</div></div>
+                        </div>
+                    `;
+                    break;
+                case 'headers':
+                    const reqHeaders = Object.entries(selectedPacket.requestHeaders || {}).map(([k, v]) => 
+                        `<div class="border-b border-gray-700 pb-2"><div class="text-xs text-gray-500">${k}</div><div class="text-sm break-all">${v}</div></div>`
+                    ).join('');
+                    content = `<div class="space-y-2"><h3 class="font-semibold text-yellow-400 mb-2">Request Headers</h3>${reqHeaders}</div>`;
+                    break;
+                case 'request':
+                    content = `<pre class="bg-gray-900 p-3 rounded text-xs overflow-x-auto"><code class="text-green-400">${selectedPacket.requestBody || 'No request body'}</code></pre>`;
+                    break;
+                case 'response':
+                    content = `<pre class="bg-gray-900 p-3 rounded text-xs overflow-x-auto"><code class="text-blue-400">${selectedPacket.responseBody || 'No response body'}</code></pre>`;
+                    break;
+                case 'memory':
+                    content = `
+                        <div class="space-y-3">
+                            <div class="bg-gray-900 p-4 rounded">
+                                <div class="text-xs text-gray-500 mb-2">Memory Information</div>
+                                <div class="space-y-2">
+                                    <div class="flex justify-between"><span class="text-sm text-gray-400">Memory Offset:</span><span class="text-sm font-mono text-yellow-400">${selectedPacket.memoryOffset}</span></div>
+                                    <div class="flex justify-between"><span class="text-sm text-gray-400">Process ID:</span><span class="text-sm font-mono text-cyan-400">${selectedPacket.processId}</span></div>
+                                    <div class="flex justify-between"><span class="text-sm text-gray-400">Thread ID:</span><span class="text-sm font-mono text-cyan-400">${selectedPacket.threadId}</span></div>
+                                </div>
+                            </div>
+                            ${selectedPacket.isGame ? `
+                                <div class="bg-purple-900 bg-opacity-20 border border-purple-700 p-4 rounded">
+                                    <div class="text-xs text-purple-400 mb-2">🎮 Oyun Trafiği Tespit Edildi</div>
+                                    <div class="text-sm">Bu istek oyun içi aktivite içeriyor</div>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                    break;
+            }
+            
+            document.getElementById('packet-details').innerHTML = content;
+        }
+
+        // Tab butonları
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => showTab(btn.dataset.tab));
+        });
+
+        // Helper functions
+        function getMethodColor(method) {
+            const colors = {
+                GET: 'bg-blue-100 text-blue-700',
+                POST: 'bg-green-100 text-green-700',
+                PUT: 'bg-yellow-100 text-yellow-700',
+                DELETE: 'bg-red-100 text-red-700',
+                PATCH: 'bg-purple-100 text-purple-700'
+            };
+            return colors[method] || 'bg-gray-100 text-gray-700';
+        }
+
+        function getStatusColor(code) {
+            if (code >= 200 && code < 300) return 'text-green-400';
+            if (code >= 300 && code < 400) return 'text-blue-400';
+            if (code >= 400 && code < 500) return 'text-orange-400';
+            return 'text-red-400';
+        }
+
+        function formatBytes(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1048576) return (bytes / 1024).toFixed(2) + ' KB';
+            return (bytes / 1048576).toFixed(2) + ' MB';
+        }
+
+        function clearPackets() {
+            if (confirm('Tüm paketleri temizlemek istediğinize emin misiniz?')) {
+                packets = [];
+                stats = { total: 0, http: 0, https: 0, game: 0, size: 0 };
+                selectedPacket = null;
+                updateStats();
+                renderPackets();
+                document.getElementById('packet-details').innerHTML = '<div class="text-center text-gray-500 mt-20">Bir paket seçin</div>';
+            }
+        }
+
+        function exportPackets() {
+            const dataStr = JSON.stringify(packets, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(dataBlob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `network-capture-${Date.now()}.json`;
+            link.click();
+        }
+
+        function filterPackets() {
+            renderPackets();
+        }
+
+        // Başlat
+        connectWebSocket();
+    </script>
+</body>
+</html>
