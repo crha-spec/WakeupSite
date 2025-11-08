@@ -1,23 +1,20 @@
 const express = require('express');
-const { createProxyMiddleware } = require('http-proxy-middleware');
 const http = require('http');
-const https = require('https');
 const WebSocket = require('ws');
 const cors = require('cors');
-const forge = require('node-forge');
-const fs = require('fs');
-const path = require('path');
+const url = require('url');
+const axios = require('axios');
 
 const app = express();
-const PORT = 8080;
-const WS_PORT = 8081;
+const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// WebSocket sunucusu - Gerçek zamanlı veri gönderimi
-const wss = new WebSocket.Server({ port: WS_PORT });
+// WebSocket sunucusu
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
 let clients = [];
 
 wss.on('connection', (ws) => {
@@ -30,7 +27,6 @@ wss.on('connection', (ws) => {
   });
 });
 
-// Tüm clientlara paket gönder
 function broadcastPacket(packet) {
   const message = JSON.stringify(packet);
   clients.forEach(client => {
@@ -40,115 +36,90 @@ function broadcastPacket(packet) {
   });
 }
 
-// SSL Sertifika oluşturma (HTTPS için)
-function generateCertificate(hostname) {
-  const keys = forge.pki.rsa.generateKeyPair(2048);
-  const cert = forge.pki.createCertificate();
-  
-  cert.publicKey = keys.publicKey;
-  cert.serialNumber = '01';
-  cert.validity.notBefore = new Date();
-  cert.validity.notAfter = new Date();
-  cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 1);
-  
-  const attrs = [{
-    name: 'commonName',
-    value: hostname
-  }];
-  
-  cert.setSubject(attrs);
-  cert.setIssuer(attrs);
-  cert.sign(keys.privateKey);
-  
-  return {
-    key: forge.pki.privateKeyToPem(keys.privateKey),
-    cert: forge.pki.certificateToPem(cert)
-  };
-}
+// Ana sayfa
+app.get('/', (req, res) => {
+  res.sendFile(__dirname + '/public/index.html');
+});
 
-// Request/Response yakalama
-const onProxyReq = (proxyReq, req, res) => {
+// Proxy endpoint - Tüm istekleri yakala
+app.all('/proxy/*', async (req, res) => {
   const startTime = Date.now();
-  req.startTime = startTime;
+  const targetUrl = req.url.replace('/proxy/', '');
   
-  // Request body'yi kaydet
-  if (req.body) {
-    const bodyData = JSON.stringify(req.body);
-    proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
-    proxyReq.write(bodyData);
-  }
-};
+  try {
+    // İsteği hedef URL'e yönlendir
+    const response = await axios({
+      method: req.method,
+      url: targetUrl,
+      headers: {
+        ...req.headers,
+        host: url.parse(targetUrl).host
+      },
+      data: req.body,
+      validateStatus: () => true, // Tüm status kodlarını kabul et
+      maxRedirects: 5
+    });
 
-const onProxyRes = (proxyRes, req, res) => {
-  const duration = Date.now() - req.startTime;
-  let body = [];
-  
-  proxyRes.on('data', (chunk) => {
-    body.push(chunk);
-  });
-  
-  proxyRes.on('end', () => {
-    const bodyBuffer = Buffer.concat(body);
-    let bodyString = '';
-    
-    try {
-      bodyString = bodyBuffer.toString('utf8');
-    } catch (e) {
-      bodyString = bodyBuffer.toString('base64');
-    }
-    
+    const duration = Date.now() - startTime;
+
     // Paket bilgilerini topla
     const packet = {
       id: Date.now() + Math.random(),
       timestamp: new Date().toISOString(),
       method: req.method,
-      url: req.url,
-      fullUrl: `${req.protocol}://${req.get('host')}${req.url}`,
-      protocol: req.protocol.toUpperCase(),
-      statusCode: proxyRes.statusCode,
-      statusMessage: proxyRes.statusMessage,
+      url: targetUrl,
+      fullUrl: targetUrl,
+      protocol: targetUrl.startsWith('https') ? 'HTTPS' : 'HTTP',
+      statusCode: response.status,
+      statusMessage: response.statusText,
       duration: duration,
-      size: bodyBuffer.length,
-      isSecure: req.protocol === 'https',
+      size: JSON.stringify(response.data).length,
+      isSecure: targetUrl.startsWith('https'),
       
-      // Headers
       requestHeaders: req.headers,
-      responseHeaders: proxyRes.headers,
+      responseHeaders: response.headers,
       
-      // Body
-      requestBody: req.body ? JSON.stringify(req.body, null, 2) : '',
-      responseBody: bodyString,
+      requestBody: JSON.stringify(req.body, null, 2),
+      responseBody: typeof response.data === 'object' 
+        ? JSON.stringify(response.data, null, 2) 
+        : String(response.data),
       
-      // Ekstra bilgiler
-      remoteAddress: req.socket.remoteAddress,
-      contentType: proxyRes.headers['content-type'] || 'unknown',
+      contentType: response.headers['content-type'] || 'unknown',
+      isGame: detectGameTraffic(targetUrl, req.headers, response.data),
       
-      // Game detection
-      isGame: detectGameTraffic(req.url, req.headers, bodyString),
-      
-      // Memory info (simulated - gerçek memory access için native module gerekir)
       memoryOffset: '0x' + Math.floor(Math.random() * 0xFFFFFF).toString(16).toUpperCase().padStart(6, '0'),
       processId: process.pid,
       threadId: 1
     };
-    
-    // WebSocket üzerinden gönder
+
+    // WebSocket'e gönder
     broadcastPacket(packet);
     
-    console.log(`📦 ${packet.method} ${packet.statusCode} ${packet.url} - ${duration}ms`);
-  });
-};
+    console.log(`📦 ${packet.method} ${packet.statusCode} ${targetUrl} - ${duration}ms`);
 
-// Oyun trafiği tespit et
-function detectGameTraffic(url, headers, body) {
+    // Response'u geri gönder
+    res.status(response.status).set(response.headers).send(response.data);
+
+  } catch (error) {
+    console.error('Proxy error:', error.message);
+    res.status(500).json({ 
+      error: 'Proxy error', 
+      message: error.message,
+      url: targetUrl 
+    });
+  }
+});
+
+function detectGameTraffic(urlString, headers, body) {
   const gameKeywords = [
     'game', 'player', 'match', 'leaderboard', 'shop', 'item',
     'character', 'level', 'achievement', 'inventory', 'quest',
     'battle', 'arena', 'pvp', 'guild', 'clan', 'unity', 'unreal'
   ];
   
-  const urlLower = url.toLowerCase();
-  const bodyLower = body.toLowerCase();
+  const urlLower = urlString.toLowerCase();
+  const bodyString = typeof body === 'object' ? JSON.stringify(body) : String(body);
+  const bodyLower = bodyString.toLowerCase();
   const userAgent = (headers['user-agent'] || '').toLowerCase();
   
   return gameKeywords.some(keyword => 
@@ -159,56 +130,30 @@ function detectGameTraffic(url, headers, body) {
   );
 }
 
-// Proxy middleware
-const proxyOptions = {
-  target: 'http://localhost',
-  changeOrigin: true,
-  ws: true,
-  onProxyReq: onProxyReq,
-  onProxyRes: onProxyRes,
-  router: (req) => {
-    // Her isteği hedef URL'e yönlendir
-    const protocol = req.headers['x-forwarded-proto'] || 'http';
-    const host = req.headers.host;
-    return `${protocol}://${host}`;
-  },
-  onError: (err, req, res) => {
-    console.error('Proxy error:', err);
-    res.writeHead(500, {
-      'Content-Type': 'text/plain',
-    });
-    res.end('Proxy error: ' + err.message);
-  }
-};
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    clients: clients.length,
+    uptime: process.uptime() 
+  });
+});
 
-// Tüm istekleri proxy'den geçir
-app.use('*', createProxyMiddleware(proxyOptions));
-
-// HTTP sunucusunu başlat
-const server = http.createServer(app);
-
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`
 ╔════════════════════════════════════════════════════════════╗
 ║                                                            ║
-║        🚀 NETWORK ANALYZER PROXY SERVER BAŞLATILDI        ║
+║        🚀 NETWORK ANALYZER CLOUD VERSION                  ║
 ║                                                            ║
-║  HTTP Proxy:  http://localhost:${PORT}                    ║
-║  WebSocket:   ws://localhost:${WS_PORT}                   ║
-║                                                            ║
-║  Web Interface: http://localhost:${PORT}                  ║
+║  Server:  http://localhost:${PORT}                        ║
+║  WebSocket: Same port                                     ║
 ║                                                            ║
 ╚════════════════════════════════════════════════════════════╝
 
-📝 Tarayıcı proxy ayarlarınızı yapın:
-   Proxy: localhost
-   Port: ${PORT}
-
-🔍 Tüm network trafiği yakalanıyor...
+🌐 Cloud deploy edildi ve çalışıyor...
   `);
 });
 
-// Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('🛑 Sunucu kapatılıyor...');
   server.close(() => {
